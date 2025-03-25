@@ -7,7 +7,7 @@ from torch.nn.modules.linear import Linear
 import sys
 sys.setrecursionlimit(3000) 
 
-class Block(torch.nn.Module):
+class Block(torch.nn.Module): # Block
     def __init__(self,d_state,dconv,expand,n1,n2,d_model_param2,seq_len,pred_len,dropout,decomp_kernel,ch_ind,l):
         super(Block, self).__init__()
 
