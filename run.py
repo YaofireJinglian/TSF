@@ -5,7 +5,7 @@ from exp.exp_main import Exp_Main
 import random
 import numpy as np
 
-if __name__ == '__main__':
+if __name__ == '__main__':# main
     parser = argparse.ArgumentParser(description='Time Series Forecasting')
 
     # RANDOM SEED
