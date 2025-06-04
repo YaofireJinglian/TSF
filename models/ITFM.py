@@ -3,15 +3,14 @@ import torch.nn as nn
 from mamba_ssm import Mamba
 import torch.nn.functional as F
 import einops
+import torch.fft as fft
 from torch.nn.modules.linear import Linear
 import sys
 sys.setrecursionlimit(3000) 
 
-class Block(torch.nn.Module): # Block
-    def __init__(self,d_state,dconv,expand,n1,n2,d_model_param2,seq_len,pred_len,dropout,decomp_kernel,ch_ind,l):
+class Block(torch.nn.Module):
+    def __init__(self, d_state, dconv, expand, n1, n2, d_model_param2, seq_len, pred_len, dropout, decomp_kernel, ch_ind, l):
         super(Block, self).__init__()
-
-        
         self.d_state = d_state
         self.dconv = dconv
         self.expand = expand
@@ -24,20 +23,24 @@ class Block(torch.nn.Module): # Block
         self.ch_ind = ch_ind
         self.l = l
         self.decompsition = series_decomp(self.decomp_kernel)
-        self.lin1=torch.nn.Linear(self.seq_len,self.n1)
-        self.dropout=torch.nn.Dropout(self.dropout)
-        self.lin2 = torch.nn.Linear(self.n1,self.n2)
-        self.d_model_param1 = 1 # 128
+        self.lin1 = torch.nn.Linear(self.seq_len, self.n1)
+        self.dropout_layer = torch.nn.Dropout(self.dropout)
+        self.lin2 = torch.nn.Linear(self.n1, self.n2)
+        self.d_model_param1 = 1  # 128
         self.d_model_param2 = d_model_param2
-        self.mamba1 = Mamba(d_model=self.d_model_param1,d_state=self.d_state,d_conv=self.dconv,expand=self.expand) 
-        self.mamba2 = Mamba(d_model=self.d_model_param2,d_state=self.d_state,d_conv=self.dconv,expand=self.expand) 
-    def forward(self,x):
+        self.mamba1 = Mamba(d_model=self.d_model_param1, d_state=self.d_state, d_conv=self.dconv, expand=self.expand)
+        self.mamba2 = Mamba(d_model=self.d_model_param2, d_state=self.d_state, d_conv=self.dconv, expand=self.expand)
+        self.tpm = TPM(d_model=self.d_model_param2, num_scales=3, ssm_state_dim=d_state)
+        self.fdm = FDM(d_model=self.d_model_param2, seq_len=seq_len, ssm_state_dim=d_state)
+        
+    def forward(self, x):
         device = x.device
         x = torch.permute(x, (0, 2, 1))
+        
         if self.ch_ind == 1:
             x = torch.reshape(x, (x.shape[0] * x.shape[1], 1, x.shape[2])) 
+        
         if self.l == 1:
-           
             x = self.lin1(x.to(device).to(self.lin1.weight.dtype))
         if self.l == 2:
             x = self.lin1(x.to(device).to(self.lin1.weight.dtype))
@@ -45,26 +48,28 @@ class Block(torch.nn.Module): # Block
            
         x_res1 = x
         seasonal_init, trend_init = self.decompsition(x)
-        seasonal, trend = self.dropout(seasonal_init).unsqueeze(0), self.dropout(trend_init).unsqueeze(0)
-        seasonal = torch.fft.rfft(seasonal.contiguous(),)
-        trend = torch.fft.rfft(trend.contiguous(),)
+        seasonal, trend = self.dropout_layer(seasonal_init).unsqueeze(0), self.dropout_layer(trend_init).unsqueeze(0)
+        seasonal = torch.fft.rfft(seasonal.contiguous())
+        trend = torch.fft.rfft(trend.contiguous())
         st = seasonal * torch.conj(trend)
-        st = torch.fft.irfft(st, n=seasonal_init.shape[2], ).squeeze(0)
+        st = torch.fft.irfft(st, n=seasonal_init.shape[2]).squeeze(0)
         x1 = self.mamba2(st.to(device)) 
-       
+
+        x_tpm = self.tpm(x.to(device))
+        
+        x_fdm = self.fdm(x.to(device))
         if self.ch_ind == 1:
-            
             x2 = torch.permute(x, (0, 2, 1))
-            x2 = self.dropout(x2)
+            x2 = self.dropout_layer(x2)
         else:
             x2 = x
-       
-        x2 = self.mamba1(x2.to(device))  # 1792,512,1
+        x2 = self.mamba1(x2.to(device))
        
         if self.ch_ind == 1:
             x2 = torch.permute(x2, (0, 2, 1))
-        x2 = x2 + x1 + x_res1 # 1792,1,512
-        # print(x2.shape)
+
+        x2 = x2 + x1 + x_res1 + x_tpm + x_fdm
+        
         return x2
 
 
@@ -127,7 +132,80 @@ class Model(torch.nn.Module):
              x = x + (means[:, 0, :].unsqueeze(1).repeat(1, self.configs.pred_len, 1))
          return x
 
+class PAM(nn.Module):
+    def __init__(self, in_dim, num_scales, scale_dims, ssm_hierarchical_dim, ssm_fine_grained_dim, ff_hidden_dim):
 
+        super().__init__()
+        self.silu = nn.SiLU()
+        
+
+        self.causal_convs = nn.ModuleList([
+            CausalConv1d(in_dim, scale_dims[i], kernel_size=2 * (i + 1) - 1)
+            for i in range(num_scales)
+        ])
+        
+
+        concat_dim = sum(scale_dims)
+        self.hierarchical_ssm = SSM(concat_dim, ssm_hierarchical_dim)
+        self.proj_hierarchical = nn.Linear(ssm_hierarchical_dim, in_dim) if ssm_hierarchical_dim != in_dim else nn.Identity()
+        self.fine_grained_ssm = SSM(in_dim, ssm_fine_grained_dim)
+        self.proj_fine_grained = nn.Linear(ssm_fine_grained_dim, in_dim) if ssm_fine_grained_dim != in_dim else nn.Identity()
+        self.feed_forward = FeedForward(in_dim, ff_hidden_dim)
+        
+    def forward(self, x):
+
+        B, L, D = x.shape
+        x_trans = x.transpose(1, 2)  # [B, D, L]
+        scale_outputs = []
+        for conv in self.causal_convs:
+            conv_out = conv(x_trans)  # [B, D_out, L]
+            scale_outputs.append(conv_out.transpose(1, 2))  # [B, L, D_out]
+        
+        concat_out = torch.cat(scale_outputs, dim=-1)  # [B, L, sum(D_out)]
+
+        hier_out = self.hierarchical_ssm(concat_out)  # [B, L, ssm_hierarchical_dim]
+        hier_out = self.proj_hierarchical(hier_out)  # [B, L, D]
+
+        ff_input = self.silu(x)
+        ff_out = self.feed_forward(ff_input)
+        fine_out = self.fine_grained_ssm(ff_out)  # [B, L, ssm_fine_grained_dim]
+        fine_out = self.proj_fine_grained(fine_out)  # [B, L, D]
+        output = x + hier_out + fine_out
+        return output
+
+
+class FDM(nn.Module):
+    def __init__(self, seq_dim, feature_dim):
+
+        super().__init__()
+        self.series_decomp = SeriesDecomp(feature_dim)
+        self.trend_fft = self._fft_placeholder 
+        self.seasonal_fft = self._fft_placeholder
+        self.frequency_ssm = SSM(feature_dim, feature_dim)  
+        self.ifft = self._ifft_placeholder
+        self.conjugate = self._conjugate_operation
+
+    def _fft_placeholder(self, x):
+        return fft.fft(x, dim=1)
+    
+    def _ifft_placeholder(self, x):
+        return fft.ifft(x, dim=1).real  # 取实部，避免虚部干扰
+
+    def _conjugate_operation(self, x):
+        return torch.conj(x)
+
+    def forward(self, x):
+        B, L, D = x.shape
+        trend_component, seasonal_component = self.series_decomp(x)
+        trend_fft = self.trend_fft(trend_component)
+        trend_conj = self.conjugate(trend_fft)
+        trend_ifft = self.ifft(trend_conj)
+        seasonal_fft = self.seasonal_fft(seasonal_component)
+        ssm_output = self.frequency_ssm(seasonal_fft)  
+        seasonal_ifft = self.ifft(ssm_output)
+        combined_seasonal = seasonal_ifft + trend_ifft 
+        final_output, _ = self.series_decomp(combined_seasonal) 
+        return final_output
 class SSM(nn.Module):
 
     def __init__(self, d_model, state_dim=64, bidirectional=False):
@@ -278,9 +356,6 @@ class RevIN(nn.Module):
   
 
 class FeedForward(nn.Module):
-
-
-
 
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(FeedForward, self).__init__()
