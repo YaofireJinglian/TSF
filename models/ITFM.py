@@ -127,6 +127,106 @@ class Model(torch.nn.Module):
              x = x + (means[:, 0, :].unsqueeze(1).repeat(1, self.configs.pred_len, 1))
          return x
 
+
+class SSM(nn.Module):
+
+    def __init__(self, d_model, state_dim=64, bidirectional=False):
+        """
+        d_model: 输入/输出维度
+        state_dim: 状态空间维度（隐藏状态大小）
+        bidirectional: 是否双向
+        """
+        super().__init__()
+        self.d_model = d_model
+        self.state_dim = state_dim
+        self.bidirectional = bidirectional
+        
+
+        self.A_real = nn.Parameter(torch.randn(d_model, state_dim))
+        self.A_imag = nn.Parameter(torch.randn(d_model, state_dim))
+        self.B = nn.Parameter(torch.randn(d_model, state_dim))
+        self.C = nn.Parameter(torch.randn(d_model, state_dim))
+        self.D = nn.Parameter(torch.randn(d_model))
+        
+
+        self._init_parameters()
+        
+
+        if bidirectional:
+            self.A_real_rev = nn.Parameter(torch.randn(d_model, state_dim))
+            self.A_imag_rev = nn.Parameter(torch.randn(d_model, state_dim))
+            self.B_rev = nn.Parameter(torch.randn(d_model, state_dim))
+            self.C_rev = nn.Parameter(torch.randn(d_model, state_dim))
+            self._init_parameters_rev()
+    
+    def _init_parameters(self):
+
+        nn.init.normal_(self.A_real, mean=0.0, std=0.2)
+        nn.init.normal_(self.A_imag, mean=0.0, std=0.2)
+        
+
+        nn.init.xavier_normal_(self.B)
+        nn.init.xavier_normal_(self.C)
+        
+
+        nn.init.constant_(self.D, 0.1)
+    
+    def _init_parameters_rev(self):
+
+        nn.init.normal_(self.A_real_rev, mean=0.0, std=0.2)
+        nn.init.normal_(self.A_imag_rev, mean=0.0, std=0.2)
+        nn.init.xavier_normal_(self.B_rev)
+        nn.init.xavier_normal_(self.C_rev)
+    
+    def forward(self, x):
+
+        batch_size, seq_len, _ = x.shape
+        A = self._compute_discrete_A()
+        state = torch.zeros(batch_size, self.state_dim, device=x.device)
+        outputs = []
+        for t in range(seq_len):
+            u_t = x[:, t, :]  # [batch_size, d_model]
+            state = torch.einsum('bd, bsd -> bs', u_t, self.B.unsqueeze(0)) + \
+                    torch.einsum('bs, bsd -> bd', state, A)
+            y_t = torch.einsum('bs, bsd -> bd', state, self.C.unsqueeze(0)) + \
+                  torch.einsum('bd, d -> bd', u_t, self.D)
+            outputs.append(y_t.unsqueeze(1))
+        output = torch.cat(outputs, dim=1)  # [batch_size, seq_len, d_model]
+
+        if self.bidirectional:
+            A_rev = self._compute_discrete_A(reverse=True)
+            state_rev = torch.zeros(batch_size, self.state_dim, device=x.device)
+            outputs_rev = []
+            for t in reversed(range(seq_len)):
+                u_t = x[:, t, :]
+                state_rev = torch.einsum('bd, bsd -> bs', u_t, self.B_rev.unsqueeze(0)) + \
+                           torch.einsum('bs, bsd -> bd', state_rev, A_rev)
+                y_t_rev = torch.einsum('bs, bsd -> bd', state_rev, self.C_rev.unsqueeze(0)) + \
+                         torch.einsum('bd, d -> bd', u_t, self.D)
+                outputs_rev.insert(0, y_t_rev.unsqueeze(1))
+            
+            output_rev = torch.cat(outputs_rev, dim=1)
+            output = output + output_rev  
+        
+        return output
+    
+    def _compute_discrete_A(self, reverse=False):
+        if reverse and self.bidirectional:
+            real = self.A_real_rev
+            imag = self.A_imag_rev
+        else:
+            real = self.A_real
+            imag = self.A_imag
+        real = F.tanh(real) * 0.5
+        A_complex = torch.complex(real, imag)
+        I = torch.eye(self.state_dim, device=real.device).unsqueeze(0)
+        A_plus = I + 0.5 * A_complex.unsqueeze(1)
+        A_minus = I - 0.5 * A_complex.unsqueeze(1)
+        A_inv = torch.inverse(A_plus)
+        A_d_complex = torch.bmm(A_inv, A_minus)
+        A_d = A_d_complex.real
+        return A_d
+        
 class RevIN(nn.Module):
     def __init__(self, num_features: int, eps=1e-5, affine=True):
         """
