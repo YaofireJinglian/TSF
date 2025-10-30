@@ -14,8 +14,8 @@ if __name__ == '__main__':# main
     # BASIC CONFIG
     parser.add_argument('--is_training', type=int, required=False, default=1, help='status')
     parser.add_argument('--model_id', type=str, required=False, default='test', help='model id')
-    parser.add_argument('--model', type=str, required=False, default='ITFM',
-                        help='model name, options: [ITFM]')
+    parser.add_argument('--model', type=str, required=False, default='CDTF-Mamba',
+                        help='model name, options: [CDTF-Mamba]')
     parser.add_argument('--model_id_name', type=str, required=False, default='ETTh2', help='model id name')
 
     # DATALOADER
