@@ -132,88 +132,110 @@ class Model(torch.nn.Module):
              x = x + (means[:, 0, :].unsqueeze(1).repeat(1, self.configs.pred_len, 1))
          return x
 
-class PAM(nn.Module):
-    def __init__(self, in_dim, num_scales, scale_dims, ssm_hierarchical_dim, ssm_fine_grained_dim, ff_hidden_dim):
-
+class TPM(nn.Module):
+    def __init__(self, in_dim, num_scales, scale_dims, ssm_hierarchical_dim, ssm_fine_grained_dim, ff_hidden_dim, dropout_p=0.1):
         super().__init__()
         self.silu = nn.SiLU()
-        
+        self.dropout = nn.Dropout(dropout_p)
 
+        self.proj_in_top = nn.Linear(in_dim, in_dim)
         self.causal_convs = nn.ModuleList([
             CausalConv1d(in_dim, scale_dims[i], kernel_size=2 * (i + 1) - 1)
             for i in range(num_scales)
         ])
-        
-
         concat_dim = sum(scale_dims)
-        self.hierarchical_ssm = SSM(concat_dim, ssm_hierarchical_dim)
-        self.proj_hierarchical = nn.Linear(ssm_hierarchical_dim, in_dim) if ssm_hierarchical_dim != in_dim else nn.Identity()
-        self.fine_grained_ssm = SSM(in_dim, ssm_fine_grained_dim)
-        self.proj_fine_grained = nn.Linear(ssm_fine_grained_dim, in_dim) if ssm_fine_grained_dim != in_dim else nn.Identity()
-        self.feed_forward = FeedForward(in_dim, ff_hidden_dim)
-        
-    def forward(self, x):
+        self.proj_y = nn.Linear(concat_dim, ssm_hierarchical_dim)
+        self.hierarchical_ssm = SSM(ssm_hierarchical_dim, ssm_hierarchical_dim)
+        self.proj_out_top = nn.Linear(ssm_hierarchical_dim, in_dim)
 
-        B, L, D = x.shape
-        x_trans = x.transpose(1, 2)  # [B, D, L]
+        self.proj_in_bottom = nn.Linear(in_dim, in_dim)
+        self.feed_forward = FeedForward(in_dim, ff_hidden_dim)
+        self.proj_ff = nn.Linear(in_dim, ssm_fine_grained_dim)
+        self.fine_grained_ssm = SSM(ssm_fine_grained_dim, ssm_fine_grained_dim)
+        self.proj_out_bottom = nn.Linear(ssm_fine_grained_dim, in_dim)
+
+    def forward(self, x):
+        # x: [B, L, D]
+        x_residual = x
+
+        x_top = self.proj_in_top(x)               # [B, L, D]
+        x_top_act = self.silu(x_top)              # [B, L, D]
+        x_trans = x_top_act.transpose(1, 2)       # [B, D, L]
         scale_outputs = []
         for conv in self.causal_convs:
-            conv_out = conv(x_trans)  # [B, D_out, L]
-            scale_outputs.append(conv_out.transpose(1, 2))  # [B, L, D_out]
-        
-        concat_out = torch.cat(scale_outputs, dim=-1)  # [B, L, sum(D_out)]
+            conv_out = conv(x_trans)              # [B, D_out_i, L]
+            scale_outputs.append(conv_out.transpose(1, 2))  # [B, L, D_out_i]
+        y_fused = torch.cat(scale_outputs, dim=-1)           
+        y_gating = self.proj_y(y_fused)                     # [B, L, H_hier]
+        y_ssm = self.hierarchical_ssm(y_gating)              # [B, L, H_hier]
+        hier_gated = y_gating * y_ssm                       # [B, L, H_hier]
+        hier_out = self.proj_out_top(hier_gated)             # [B, L, D]
 
-        hier_out = self.hierarchical_ssm(concat_out)  # [B, L, ssm_hierarchical_dim]
-        hier_out = self.proj_hierarchical(hier_out)  # [B, L, D]
+        x_bottom = self.dropout(x)
+        x_bottom = self.proj_in_bottom(x_bottom)             # [B, L, D]
+        x_bottom_act = self.silu(x_bottom)                   # [B, L, D]
+        ff_out = self.feed_forward(x_bottom_act)             # [B, L, D]
+        ff_gating = self.proj_ff(ff_out)                     # [B, L, H_fine]
+        ff_ssm = self.fine_grained_ssm(ff_gating)            # [B, L, H_fine]
+        fine_gated = ff_gating * ff_ssm                      # [B, L, H_fine]
+        fine_out = self.proj_out_bottom(fine_gated)          # [B, L, D]
 
-        ff_input = self.silu(x)
-        ff_out = self.feed_forward(ff_input)
-        fine_out = self.fine_grained_ssm(ff_out)  # [B, L, ssm_fine_grained_dim]
-        fine_out = self.proj_fine_grained(fine_out)  # [B, L, D]
-        output = x + hier_out + fine_out
+        output = x_residual + hier_out + fine_out            # [B, L, D]
         return output
 
 
 class FDM(nn.Module):
-    def __init__(self, seq_dim, feature_dim):
-
+    def __init__(self, k, seq_dim, feature_dim, fssm_hidden_dim, ff_hidden_dim):
+        
         super().__init__()
+        
+        self.k = k
+
+        self.proj_q = nn.Linear(feature_dim, feature_dim)
+        self.proj_k = nn.Linear(feature_dim, feature_dim)
+        self.proj_v = nn.Linear(feature_dim, feature_dim)
+        self.ssm_q = SSM(feature_dim, feature_dim)
+        self.ssm_k = SSM(feature_dim, feature_dim)
+        self.ssm_v = SSM(feature_dim, feature_dim)
+        self.silu = nn.SiLU()
+        self.ff_v = FeedForward(feature_dim, fssm_hidden_dim) 
         self.series_decomp = SeriesDecomp(feature_dim)
-        self.trend_fft = self._fft_placeholder 
-        self.seasonal_fft = self._fft_placeholder
-        self.frequency_ssm = SSM(feature_dim, feature_dim)  
-        self.ifft = self._ifft_placeholder
-        self.conjugate = self._conjugate_operation
-
-    def _fft_placeholder(self, x):
-        return fft.fft(x, dim=1)
+        self.feed_forward = FeedForward(feature_dim, ff_hidden_dim) 
     
-    def _ifft_placeholder(self, x):
-        return fft.ifft(x, dim=1).real  # 取实部，避免虚部干扰
-
-    def _conjugate_operation(self, x):
-        return torch.conj(x)
+    def _fft(self, x):
+        return fft.fft(x, dim=1) 
+    
+    def _ifft(self, x):
+        return fft.ifft(x, dim=1).real
 
     def forward(self, x):
-        B, L, D = x.shape
-        trend_component, seasonal_component = self.series_decomp(x)
-        trend_fft = self.trend_fft(trend_component)
-        trend_conj = self.conjugate(trend_fft)
-        trend_ifft = self.ifft(trend_conj)
-        seasonal_fft = self.seasonal_fft(seasonal_component)
-        ssm_output = self.frequency_ssm(seasonal_fft)  
-        seasonal_ifft = self.ifft(ssm_output)
-        combined_seasonal = seasonal_ifft + trend_ifft 
-        final_output, _ = self.series_decomp(combined_seasonal) 
-        return final_output
+        
+        Q = self.proj_q(x) 
+        K = self.proj_k(x) 
+        V = self.proj_v(x) 
+        q_fft = self._fft(Q)
+        q_ssm = self.ssm_q(q_fft) 
+        k_fft = self._fft(K)
+        k_ssm = self.ssm_k(k_fft) 
+        v_act = self.silu(V)
+        v_ssm = self.ssm_v(v_act)
+        v_path = self.ff_v(v_ssm) 
+        qk_prod = q_ssm * torch.conj(k_ssm) 
+        qk_path = self._ifft(qk_prod)       
+        fssm_output = qk_path * v_path 
+        decomp_trend, _ = self.series_decomp(fssm_output)
+        x_current = x 
+        for _ in range(self.k):
+            x_residual_iter = x_current
+            ff_input = x_residual_iter + decomp_trend
+            ff_output = self.feed_forward(ff_input)
+            x_current = x_residual_iter + ff_output
+        
+        return x_current
 class SSM(nn.Module):
 
     def __init__(self, d_model, state_dim=64, bidirectional=False):
-        """
-        d_model: 输入/输出维度
-        state_dim: 状态空间维度（隐藏状态大小）
-        bidirectional: 是否双向
-        """
+
         super().__init__()
         self.d_model = d_model
         self.state_dim = state_dim
