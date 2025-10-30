@@ -8,129 +8,90 @@ from torch.nn.modules.linear import Linear
 import sys
 sys.setrecursionlimit(3000) 
 
-class Block(torch.nn.Module):
-    def __init__(self, d_state, dconv, expand, n1, n2, d_model_param2, seq_len, pred_len, dropout, decomp_kernel, ch_ind, l ):
+import torch
+import torch.nn as nn
+
+class Block(nn.Module):
+    def __init__(self, d_model, seq_len, d_state, dconv, expand, dropout, decomp_kernel, ch_ind, tpm_num_scales, ssm_state_dim):
         super(Block, self).__init__()
-        self.d_state = d_state
-        self.dconv = dconv
-        self.expand = expand
-        self.n1 = n1
-        self.n2 = n2
-        self.seq_len = seq_len
-        self.pred_len = pred_len
-        self.dropout = dropout
-        self.decomp_kernel = decomp_kernel
-        self.ch_ind = ch_ind
-        self.l = l
-        self.decompsition = series_decomp(self.decomp_kernel)
-        self.lin1 = torch.nn.Linear(self.seq_len, self.n1)
-        self.dropout_layer = torch.nn.Dropout(self.dropout)
-        self.lin2 = torch.nn.Linear(self.n1, self.n2)
-        self.d_model_param1 = 1  # 128
-        self.d_model_param2 = d_model_param2
-        self.mamba1 = Mamba(d_model=self.d_model_param1, d_state=self.d_state, d_conv=self.dconv, expand=self.expand)
-        self.mamba2 = Mamba(d_model=self.d_model_param2, d_state=self.d_state, d_conv=self.dconv, expand=self.expand)
-        self.tpm = TPM(d_model=self.d_model_param2, num_scales=3, ssm_state_dim=d_state)
-        self.fdm = FDM(d_model=self.d_model_param2, seq_len=seq_len, ssm_state_dim=d_state)
-        
+        self.tpm = TPM(d_model=d_model, num_scales=tpm_num_scales, ssm_state_dim=ssm_state_dim)
+        self.fdm = FDM(d_model=d_model, seq_len=seq_len, ssm_state_dim=ssm_state_dim)
+        self.dfm = DFM(d_model=d_model, d_state=d_state, dconv=dconv, expand=expand, dropout=dropout, decomp_kernel=decomp_kernel, ch_ind=ch_ind)
+
     def forward(self, x):
-        device = x.device
-        x = torch.permute(x, (0, 2, 1))
-        
-        if self.ch_ind == 1:
-            x = torch.reshape(x, (x.shape[0] * x.shape[1], 1, x.shape[2])) 
-        
-        if self.l == 1:
-            x = self.lin1(x.to(device).to(self.lin1.weight.dtype))
-        if self.l == 2:
-            x = self.lin1(x.to(device).to(self.lin1.weight.dtype))
-            x = self.lin2(x.to(device).to(self.lin1.weight.dtype))
-           
-        x_res1 = x
-        seasonal_init, trend_init = self.decompsition(x)
-        seasonal, trend = self.dropout_layer(seasonal_init).unsqueeze(0), self.dropout_layer(trend_init).unsqueeze(0)
-        seasonal = torch.fft.rfft(seasonal.contiguous())
-        trend = torch.fft.rfft(trend.contiguous())
-        st = seasonal * torch.conj(trend)
-        st = torch.fft.irfft(st, n=seasonal_init.shape[2]).squeeze(0)
-        x1 = self.mamba2(st.to(device)) 
-
-        x_tpm = self.tpm(x.to(device))
-        
-        x_fdm = self.fdm(x.to(device))
-        if self.ch_ind == 1:
-            x2 = torch.permute(x, (0, 2, 1))
-            x2 = self.dropout_layer(x2)
-        else:
-            x2 = x
-        x2 = self.mamba1(x2.to(device))
-       
-        if self.ch_ind == 1:
-            x2 = torch.permute(x2, (0, 2, 1))
-
-        x2 = x2 + x1 + x_res1 + x_tpm + x_fdm
-        
-        return x2
-
+        # x: [B, L, D]
+        tpm_out = self.tpm(x)                     # [B, L, D]
+        fdm_out = self.fdm(x)                     # [B, L, D]
+        block_output = self.dfm(x, tpm_out, fdm_out)  # [B, L, D]
+        return block_output
 
 class Model(torch.nn.Module):
-    def __init__(self,configs):
+    def __init__(self, configs):
         super(Model, self).__init__()
-        self.configs=configs
-        if self.configs.revin==1:
+        self.configs = configs
+        self.enc_in = configs.enc_in
+        self.seq_len = configs.seq_len
+        self.pred_len = configs.pred_len
+        self.num_layers = configs.num_layers 
+        
+        self.d_model = configs.n1 
+        
+        if self.configs.revin == 1:
             self.revin_layer = RevIN(self.configs.enc_in)
-
-        self.b1 = Block(d_state=self.configs.d_state,dconv=self.configs.dconv,expand=self.configs.e_fact,
-        n1=self.configs.n1,n2=self.configs.n2,d_model_param2=self.configs.n1,seq_len=self.configs.seq_len,
-        pred_len=self.configs.pred_len,dropout=self.configs.dropout,decomp_kernel=25,ch_ind=self.configs.ch_ind,l=1)
-
-        self.b2 = Block(d_state=self.configs.d_state,dconv=self.configs.dconv,expand=self.configs.e_fact,
-        n1=self.configs.n1,n2=self.configs.n2,d_model_param2=self.configs.n2,seq_len=self.configs.seq_len,
-        pred_len=self.configs.pred_len,dropout=self.configs.dropout,decomp_kernel=25,ch_ind=self.configs.ch_ind,l=2)
+            
+        self.proj_in = torch.nn.Linear(self.seq_len, self.d_model)
         
+        self.blocks = nn.ModuleList()
+        for _ in range(self.num_layers):
+            self.blocks.append(Block(
+                d_model=self.enc_in, 
+                seq_len=self.d_model, 
+                d_state=self.configs.d_state,
+                dconv=self.configs.dconv,
+                expand=self.configs.e_fact,
+                dropout=self.configs.dropout,
+                decomp_kernel=25, 
+                ch_ind=self.configs.ch_ind,
+                tpm_num_scales=3, 
+                ssm_state_dim=self.configs.d_state 
+            ))
 
-        self.lin3=torch.nn.Linear(self.configs.n2,self.configs.n1)
-        self.lin4=torch.nn.Linear(2*self.configs.n1,self.configs.pred_len)
-        self.ln = nn.LayerNorm(configs.n1)
-        self.ln2 = nn.LayerNorm(self.configs.n2)
 
-        self.fd1 = FeedForward(configs.n1,2048)
-        self.fd2 = FeedForward(self.configs.n2,2048)
-
+        k_size = 7 
+        self.convs = nn.ModuleList()
+        for _ in range(self.num_layers):
+            self.convs.append(nn.Conv1d(
+                in_channels=self.enc_in, 
+                out_channels=self.enc_in, 
+                kernel_size=k_size, 
+                padding=(k_size - 1) // 2
+            ))
         
-
+        self.liner_conv = torch.nn.Linear(self.seq_len, self.d_model) #  L -> n1
+        self.final_proj = torch.nn.Linear(2 * self.d_model, self.pred_len) #  2*n1 -> pred_len
+        
     def forward(self, x):
-       
-         device = x.device 
-         x=self.revin_layer(x,'norm')
-         
-    
-         x1 = self.b1(x)
-         # FFD--------------------------------
-         x1 = self.ln(x1) + x1
-         x1_fd1 = self.fd1(x1)
-         x1 = self.ln(x1_fd1+x1)
-         # FFD--------------------------------
-         x2 = self.b2(x)
-         # FFD -------------------------------
-         x2 = self.ln2(x2) + x2
-         x2_fd2 = self.fd2(x2)
-         x2 = self.ln2(x2_fd2+x2)
-         # FFD -------------------------------
-         x2 = self.lin3(x2.to(device))  # 1792,1,512
-        #  x3 = self.b1(x)
-        #  x4 = self.b2(x)
-         x = torch.cat([x2, x1], dim=2)  # 1792,1,1024
-         x = self.lin4(x.to(device))  # 1792,1,96
-         if self.configs.ch_ind == 1:
-            x = torch.reshape(x, (-1, self.configs.enc_in, self.configs.pred_len))  # 256,7,96
-         x = torch.permute(x, (0, 2, 1))  # 256,96,7
-         if self.configs.revin==1:
-             x=self.revin_layer(x,'denorm')
-         else:
-             x = x * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.configs.pred_len, 1))
-             x = x + (means[:, 0, :].unsqueeze(1).repeat(1, self.configs.pred_len, 1))
-         return x
+        if self.configs.revin == 1:
+            x = self.revin_layer(x, 'norm')
+
+        x_block_perm = x.permute(0, 2, 1) # -> [B, D, L]
+        x_block_proj = self.proj_in(x_block_perm) # -> [B, D, n1]
+        x_block = x_block_proj.permute(0, 2, 1) # -> [B, n1, D]
+
+        x_conv = x.permute(0, 2, 1) # -> [B, D, L]
+        for i in range(self.num_layers):
+            x_block = self.blocks[i](x_block) # [B, n1, D]
+            x_conv = self.convs[i](x_conv)   # [B, D, L]
+        out_block_proj = x_block.permute(0, 2, 1) # -> [B, D, n1]
+        out_liner = self.liner_conv(x_conv) # [B, D, L] -> [B, D, n1]
+        out_concat = torch.cat([out_block_proj, out_liner], dim=-1) # -> [B, D, 2*n1]
+        output = self.final_proj(out_concat) # -> [B, D, pred_len]
+        output = output.permute(0, 2, 1) # -> [B, pred_len, D]
+        
+        if self.configs.revin == 1:
+            output = self.revin_layer(output, 'denorm')
+            
+        return output
 
 class TPM(nn.Module):
     def __init__(self, in_dim, num_scales, scale_dims, ssm_hierarchical_dim, ssm_fine_grained_dim, ff_hidden_dim, dropout_p=0.1):
@@ -232,6 +193,40 @@ class FDM(nn.Module):
             x_current = x_residual_iter + ff_output
         
         return x_current
+class DFM(nn.Module):
+    def __init__(self, d_model, d_state, dconv, expand, dropout, decomp_kernel, ch_ind=1):
+        super(DFM, self).__init__()
+        self.d_model = d_model
+        self.ch_ind = ch_ind
+        self.decompsition = series_decomp(decomp_kernel)
+        self.dropout_layer = nn.Dropout(dropout)
+        self.mamba_freq = Mamba(d_model=self.d_model, d_state=d_state, d_conv=dconv, expand=expand)
+        self.mamba_time = Mamba(d_model=1 if ch_ind == 1 else self.d_model, d_state=d_state, d_conv=dconv, expand=expand)
+
+    def forward(self, x, tpm_out, fdm_out):
+        # x, tpm_out, fdm_out: [B, L, D]
+        device = x.device
+        x_fused = x + tpm_out + fdm_out                 # [B, L, D]
+        x_perm = x_fused.permute(0, 2, 1)               # [B, D, L]
+        B, D, L = x_perm.shape
+        seasonal_init, trend_init = self.decompsition(x_perm)
+        seasonal = self.dropout_layer(seasonal_init).unsqueeze(0)
+        trend = self.dropout_layer(trend_init).unsqueeze(0)
+        seasonal_fft = torch.fft.rfft(seasonal.contiguous())
+        trend_fft = torch.fft.rfft(trend.contiguous())
+        st = seasonal_fft * torch.conj(trend_fft)
+        st = torch.fft.irfft(st, n=L).squeeze(0)        # [B, D, L]
+        x_freq_out = self.mamba_freq(st.to(device))     # [B, D, L]
+        x_time_in = self.dropout_layer(x_perm)          # [B, D, L]
+        if self.ch_ind == 1:
+            x_time_in_reshaped = x_time_in.reshape(B * D, 1, L)
+            x_time_out_reshaped = self.mamba_time(x_time_in_reshaped.to(device))
+            x_time_out = x_time_out_reshaped.reshape(B, D, L)   # [B, D, L]
+        else:
+            x_time_out = self.mamba_time(x_time_in.to(device))  # [B, D, L]
+        dfm_out_perm = x_freq_out + x_time_out          # [B, D, L]
+        dfm_out = dfm_out_perm.permute(0, 2, 1)         # [B, L, D]
+        return dfm_out
 class SSM(nn.Module):
 
     def __init__(self, d_model, state_dim=64, bidirectional=False):
