@@ -69,7 +69,23 @@ if __name__ == '__main__':# main
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids of multile gpus')
     parser.add_argument('--test_flop', action='store_true', default=False, help='See utils/tools for usage')
+    # --- MODEL CONFIGS ---
+    parser.add_argument('--num_layers', type=int, default=2, help='number of stacked blocks (N)')
+    parser.add_argument('--revin', type=int, default=1, help='Reversible Instance Normalization; True 1 False 0')
+    parser.add_argument('--k', type=int, default=3, help='k iterations for FDM (from image_6a7505.png)')
 
+    # --- SUB-MODULE: TPM ---
+    parser.add_argument('--scale_dims', type=int, nargs='+', default=[16, 16, 16], 
+                        help='list of output dims for CausalConv1d scales in TPM (e.g., 16 16 16)')
+    parser.add_argument('--ssm_hierarchical_dim', type=int, default=64, help='dim for hierarchical SSM in TPM')
+    parser.add_argument('--ssm_fine_grained_dim', type=int, default=64, help='dim for fine-grained SSM in TPM')
+
+    # --- SUB-MODULE: FDM ---
+    parser.add_argument('--fssm_hidden_dim', type=int, default=256, help='hidden dim for FSSM in FDM')
+
+    # --- SUB-MODULE: Shared ---
+    parser.add_argument('--ff_hidden_dim', type=int, default=128, 
+                        help='hidden dim for FeedForward layers in both TPM and FDM')
     args = parser.parse_args()
 
     # random seed
