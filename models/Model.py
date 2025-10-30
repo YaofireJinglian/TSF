@@ -12,63 +12,86 @@ import torch
 import torch.nn as nn
 
 class Block(nn.Module):
-    def __init__(self, d_model, seq_len, d_state, dconv, expand, dropout, decomp_kernel, ch_ind, tpm_num_scales, ssm_state_dim):
+    def __init__(self, d_model, seq_len, d_state, dconv, expand, dropout, 
+                 decomp_kernel, ch_ind, tpm_num_scales, ssm_state_dim,
+                 k, scale_dims, ssm_hierarchical_dim, ssm_fine_grained_dim, 
+                 ff_hidden_dim, fssm_hidden_dim):
+        
         super(Block, self).__init__()
-        self.tpm = TPM(d_model=d_model, num_scales=tpm_num_scales, ssm_state_dim=ssm_state_dim)
-        self.fdm = FDM(d_model=d_model, seq_len=seq_len, ssm_state_dim=ssm_state_dim)
-        self.dfm = DFM(d_model=d_model, d_state=d_state, dconv=dconv, expand=expand, dropout=dropout, decomp_kernel=decomp_kernel, ch_ind=ch_ind)
+        
+        self.tpm = TPM(
+            in_dim=d_model, 
+            num_scales=tpm_num_scales, 
+            scale_dims=scale_dims, 
+            ssm_hierarchical_dim=ssm_hierarchical_dim, 
+            ssm_fine_grained_dim=ssm_fine_grained_dim, 
+            ff_hidden_dim=ff_hidden_dim,
+            dropout_p=dropout
+        )
+        
+        self.fdm = FDM(
+            k=k, 
+            seq_dim=seq_len, 
+            feature_dim=d_model, 
+            fssm_hidden_dim=fssm_hidden_dim, 
+            ff_hidden_dim=ff_hidden_dim
+        )
+        
+        self.dfm = DFM(
+            d_model=d_model, 
+            d_state=d_state, 
+            dconv=dconv, 
+            expand=expand, 
+            dropout=dropout, 
+            decomp_kernel=decomp_kernel, 
+            ch_ind=ch_ind
+        )
 
     def forward(self, x):
         # x: [B, L, D]
-        tpm_out = self.tpm(x)                     # [B, L, D]
-        fdm_out = self.fdm(x)                     # [B, L, D]
+        tpm_out = self.tpm(x)      # [B, L, D]
+        fdm_out = self.fdm(x)      # [B, L, D]
         block_output = self.dfm(x, tpm_out, fdm_out)  # [B, L, D]
         return block_output
-
-class Model(torch.nn.Module):
+class Model(nn.Module):
     def __init__(self, configs):
         super(Model, self).__init__()
         self.configs = configs
-        self.enc_in = configs.enc_in
-        self.seq_len = configs.seq_len
-        self.pred_len = configs.pred_len
-        self.num_layers = configs.num_layers 
-        
-        self.d_model = configs.n1 
-        
+        self.enc_in = configs.enc_in             
+        self.seq_len = configs.seq_len           
+        self.pred_len = configs.pred_len         
+        self.num_layers = configs.num_layers    
+        self.d_model = configs.n1                
+
         if self.configs.revin == 1:
-            self.revin_layer = RevIN(self.configs.enc_in)
-            
-        self.proj_in = torch.nn.Linear(self.seq_len, self.d_model)
-        
+            self.revin_layer = RevIN(self.enc_in)
+
+        self.proj_in = nn.Linear(self.seq_len, self.d_model)
+
         self.blocks = nn.ModuleList()
         for _ in range(self.num_layers):
             self.blocks.append(Block(
-                d_model=self.enc_in, 
-                seq_len=self.d_model, 
+                d_model=self.enc_in,                     # D
+                seq_len=self.d_model,                    # n1
                 d_state=self.configs.d_state,
                 dconv=self.configs.dconv,
                 expand=self.configs.e_fact,
                 dropout=self.configs.dropout,
-                decomp_kernel=25, 
+                decomp_kernel=25,
                 ch_ind=self.configs.ch_ind,
-                tpm_num_scales=3, 
-                ssm_state_dim=self.configs.d_state 
+                tpm_num_scales=3,
+                ssm_state_dim=self.configs.d_state,
+
+                k=self.configs.k,
+                scale_dims=self.configs.scale_dims,
+                ssm_hierarchical_dim=self.configs.ssm_hierarchical_dim,
+                ssm_fine_grained_dim=self.configs.ssm_fine_grained_dim,
+                ff_hidden_dim=self.configs.ff_hidden_dim,
+                fssm_hidden_dim=self.configs.fssm_hidden_dim
             ))
 
-
-        k_size = 7 
-        self.convs = nn.ModuleList()
-        for _ in range(self.num_layers):
-            self.convs.append(nn.Conv1d(
-                in_channels=self.enc_in, 
-                out_channels=self.enc_in, 
-                kernel_size=k_size, 
-                padding=(k_size - 1) // 2
-            ))
-        
-        self.liner_conv = torch.nn.Linear(self.seq_len, self.d_model) #  L -> n1
-        self.final_proj = torch.nn.Linear(2 * self.d_model, self.pred_len) #  2*n1 -> pred_len
+        self.linear_conv = nn.Linear(self.seq_len, self.d_model)        # L → n1
+        self.final_proj = nn.Linear(2 * self.d_model, self.pred_len)    # 2n1 → L'
         
     def forward(self, x):
         if self.configs.revin == 1:
