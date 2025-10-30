@@ -16,7 +16,8 @@ Long-term time series forecasting is critical in domains such as smart energy sy
 - **Frequency-domain Decomposition Mamba (FDM)**: Stabilizes state evolution, mitigates non-stationarity, and captures periodic/global dependencies.  
 
 Experiments on twelve benchmark datasets demonstrate CDTF-Mamba outperforms state-of-the-art methods in **accuracy, efficiency, and scalability**.
-
+## Architecture Overview
+![模型架构](Overview.png "CDTF-Mamba Architecture")
 ## Installation
 pip install -r requierment.txt  
 
