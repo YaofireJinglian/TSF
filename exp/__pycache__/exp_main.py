@@ -25,7 +25,7 @@ class Exp_Main(Exp_Basic):
 
     def _build_model(self):
         model_dict = {
-            'ITFM':ITFM
+            'CDTF-Mamba':Model
         }
         model = model_dict[self.args.model].Model(self.args).float()
 
@@ -164,30 +164,14 @@ class Exp_Main(Exp_Basic):
                             
                             outputs = self.model(batch_x)  # batch_x.shape = 16,96,7
                             # print(outputs.shape)
-#--------------------------------------------------------------------------------------------------------------
 
-                    # lamda = 0.5
-                    # ax = 1-lamda
-                    # rl = lamda
-                    # rec_lambda = rl
-                    # auxi_lambda = ax 
-#--------------------------------------------------------------------------------------------------------------
 
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                    
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     loss = criterion(outputs, batch_y)
-#--------------------------------------------------------------------------------------------------------------
 
-                    # loss = 0
-                    # loss_rec = criterion(outputs, batch_y)
-                    # loss += rec_lambda * loss_rec
-
-                    # loss_auxi = compute_auxiliary_loss(outputs, batch_y, auxi_mode='rfft', auxi_type='phase', leg_degree=2,
-                    #         mask=0.25, auxi_loss='MAE', module_first=1, device='cuda:0')
-                    # loss += auxi_lambda * loss_auxi
-#--------------------------------------------------------------------------------------------------------------
 
                     train_loss.append(loss.item())
 
@@ -421,23 +405,7 @@ def compute_kl_loss(p, q, pad_mask=None):
     return loss
 def compute_auxiliary_loss(outputs, batch_y, auxi_mode='mag', auxi_type=None, leg_degree=None,
                             mask=None, auxi_loss='MSE', module_first=False, device='cuda:0'):
-    """
-    计算辅助损失
-
-    参数:
-    - outputs (torch.Tensor): 模型输出
-    - batch_y (torch.Tensor): 真实标签
-    - auxi_mode (str): 辅助损失计算模式 ('fft', 'rfft', 'rfft-D', 'rfft-2D', 'legendre', 'chebyshev', 'hermite', 'laguerre')
-    - auxi_type (str, optional): 对于 'rfft' 模式的类型 ('complex', 'complex-phase', 'complex-mag-phase', 'phase', 'mag', 'mag-phase')
-    - leg_degree (int, optional): 用于多项式的度数（对于 'legendre', 'chebyshev', 'hermite', 'laguerre' 模式）
-    - mask (torch.Tensor, optional): 计算损失时的掩码
-    - auxi_loss (str): 辅助损失类型 ('MAE' 或 'MSE')
-    - module_first (bool): 是否先计算辅助损失的绝对值
-    - device (torch.device): 计算设备（如CPU或GPU）
-
-    返回:
-    - loss_auxi (torch.Tensor): 计算得到的辅助损失
-    """
+   
     loss_auxi = None
 
     if auxi_mode == "fft":
@@ -499,10 +467,9 @@ def compute_auxiliary_loss(outputs, batch_y, auxi_mode='mag', auxi_type=None, le
         loss_auxi *= mask
 
     if auxi_loss == "MAE":
-        # MAE, 最小化element-wise error的模长
+
         loss_auxi = loss_auxi.abs().mean() if module_first else loss_auxi.mean().abs()
     elif auxi_loss == "MSE":
-        # MSE, 最小化element-wise error的模长
         loss_auxi = (loss_auxi.abs()**2).mean() if module_first else (loss_auxi**2).mean().abs()
     else:
         raise NotImplementedError
