@@ -1,7 +1,7 @@
 
 # Cross-Domain Time-Frequency Mamba (CDTF-Mamba)
 
-> Official implementation for the paper:  
+> Official implementation for the paper （Knowledge Based System 2026）:  
 > "Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting"
 
 CDTF-Mamba is a novel architecture for **Long-Term Time Series Forecasting (LTSF)** that models time series synergistically in both the **time** and **frequency** domains.  
