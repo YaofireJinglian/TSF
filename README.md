@@ -7,80 +7,141 @@
 [![Journal](https://img.shields.io/badge/Venue-Knowledge%20Based%20Systems-1f6feb.svg)](https://www.sciencedirect.com/journal/knowledge-based-systems)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-1.12%2B-EE4C2C.svg?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 
-**Official implementation of**
-[*Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting*](#) **(Knowledge-Based Systems 2026)**
+**Official implementation of**  
+[*Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting*](#)  
+**Knowledge-Based Systems (2026)**
 
 </div>
 
 ---
 
-## 📌 Overview
+# 📌 Overview
 
-**CDTF-Mamba** is a novel Mamba-based framework for **Long-Term Time Series Forecasting (LTSF)** that jointly models temporal dynamics in both the **time** and **frequency** domains.
+**CDTF-Mamba** is a novel Mamba-based framework for **Long-Term Time Series Forecasting (LTSF)** that jointly models temporal dynamics in both the **time domain** and **frequency domain**.
 
-Unlike conventional single-domain forecasting methods, CDTF-Mamba captures both **local temporal fluctuations** and **global periodic dependencies** through a collaborative cross-domain modeling paradigm. By integrating hierarchical temporal decomposition with frequency-aware state evolution, the model achieves superior forecasting accuracy while maintaining the efficiency and linear complexity advantages of the Mamba architecture.
+Unlike conventional single-domain forecasting methods, CDTF-Mamba effectively captures both:
+
+- **Local temporal fluctuations**
+- **Global periodic dependencies**
+
+through a collaborative **cross-domain time-frequency modeling paradigm**.
+
+The framework integrates:
+
+- **Time-domain Pyramid Mamba (TPM)** for hierarchical temporal dependency modeling
+- **Frequency-domain Decomposition Mamba (FDM)** for spectral evolution learning and non-stationary sequence stabilization
+- **Cross-domain fusion mechanisms** for enhanced representation interaction
+
+As a result, CDTF-Mamba achieves superior long-term forecasting performance while maintaining the **linear complexity** and **efficient inference capability** inherited from the Mamba architecture.
+
+---
+
+# 🧠 Framework
 
 <p align="center">
   <img src="Overview.png" alt="CDTF-Mamba Framework" width="90%"/>
-  <br/>
-  <em>Figure 1. Overall framework of CDTF-Mamba. The model simultaneously models time-domain and frequency-domain representations. The Time-domain Pyramid Mamba (TPM) captures multi-scale local dependencies, while the Frequency-domain Decomposition Mamba (FDM) extracts global periodic patterns and mitigates non-stationarity, enabling robust long-term forecasting.</em>
+</p>
+
+<p align="center">
+  <em>
+  Figure 1. Overall framework of CDTF-Mamba. The model jointly learns time-domain and frequency-domain representations. TPM captures multi-scale local temporal dependencies, while FDM extracts global periodic patterns and mitigates non-stationarity, enabling robust long-term forecasting.
+  </em>
 </p>
 
 ---
 
-## 🎯 Key Features
+# 🎯 Key Features
 
-- ⏳ **Time-domain Pyramid Mamba (TPM)** — captures multi-scale temporal dependencies and local fluctuations through hierarchical temporal modeling.
-- 🌊 **Frequency-domain Decomposition Mamba (FDM)** — models periodic structures and stabilizes sequence evolution in the frequency domain.
-- 🔄 **Cross-Domain Fusion Mechanism** — enables effective interaction between temporal and spectral representations for comprehensive sequence understanding.
-- ⚡ **Linear Complexity Forecasting** — inherits the efficiency and scalability advantages of the Mamba architecture.
-- 📊 **Comprehensive Benchmark Evaluation** — validated on multiple real-world datasets spanning traffic, energy, weather, and industrial forecasting tasks.
+## ⏳ Time-domain Pyramid Mamba (TPM)
+
+- Hierarchical temporal modeling
+- Multi-scale dependency extraction
+- Enhanced local fluctuation perception
+- Progressive receptive field expansion
+
+## 🌊 Frequency-domain Decomposition Mamba (FDM)
+
+- Frequency-aware state evolution
+- Global periodic pattern modeling
+- Spectral decomposition learning
+- Improved robustness to non-stationary sequences
+
+## 🔄 Cross-Domain Fusion
+
+- Dynamic interaction between temporal and spectral representations
+- Complementary feature enhancement
+- More comprehensive sequence understanding
+
+## ⚡ Efficient Forecasting
+
+- Linear computational complexity
+- Fast inference speed
+- Memory-efficient sequence modeling
+- Scalable to long forecasting horizons
 
 ---
 
-## 📊 Results Highlights
+# 📊 Experimental Results
 
-| Metric | Result |
-|--------|--------|
-| **Forecasting Accuracy** | Achieves SOTA performance on major benchmarks |
-| **Long-Term Dependency Modeling** | Superior temporal representation capability |
-| **Efficiency** | Linear complexity with fast inference speed |
-| **Scalability** | Robust performance across varying prediction horizons |
-| **Cross-Domain Modeling** | Effectively captures both local and global patterns |
+CDTF-Mamba is extensively evaluated on multiple real-world long-term forecasting benchmarks.
+
+| Evaluation Aspect | Performance |
+|------------------|-------------|
+| Forecasting Accuracy | Achieves state-of-the-art performance |
+| Long-Term Dependency Modeling | Strong temporal representation capability |
+| Efficiency | Fast inference with linear complexity |
+| Scalability | Stable across different prediction horizons |
+| Cross-Domain Modeling | Captures both local and global patterns effectively |
 
 ---
 
-## 📈 Datasets
+# 📈 Supported Datasets
 
 The experiments are conducted on widely used long-term forecasting benchmarks:
 
-- **ETTh1 / ETTh2**
-- **ETTm1 / ETTm2**
-- **Weather**
-- **Traffic**
-- **Electricity**
-- **Exchange**
-- **Solar-Energy**
-- **PEMS**
+- ETTh1
+- ETTh2
+- ETTm1
+- ETTm2
+- Weather
+- Traffic
+- Electricity
+- Exchange
+- Solar-Energy
+- PEMS
 
 All datasets are publicly available for research purposes.
 
 ---
 
-## 🛠 Installation & Usage
+# 🛠 Installation
 
-### Requirements
+## Requirements
 
 - Python 3.8+
 - PyTorch 1.12+
+- CUDA 11.3+
 - NVIDIA GPU (tested on RTX 4090)
 
-### Install Dependencies
+## Clone Repository
+
+```bash
+git clone https://github.com/yourname/CDTF-Mamba.git
+cd CDTF-Mamba
+```
+
+## Install Dependencies
 
 ```bash
 pip install -r requirements.txt
-### Training
+```
+
+---
+
+# 🚀 Training
+
 ```bash
 python main.py \
     --is_training 1 \
@@ -105,7 +166,12 @@ python main.py \
     --train_epochs 50 \
     --use_gpu True \
     --gpu 0
-### Testing
+```
+
+---
+
+# 🧪 Testing
+
 ```bash
 python main.py \
     --is_training 0 \
@@ -125,8 +191,28 @@ python main.py \
     --revin 1 \
     --use_gpu True \
     --gpu 0
+```
 
-## 📚 Citation
+---
+
+# 📂 Project Structure
+
+```bash
+CDTF-Mamba/
+│── data/
+│── models/
+│── layers/
+│── utils/
+│── scripts/
+│── checkpoints/
+│── main.py
+│── requirements.txt
+└── README.md
+```
+
+---
+
+# 📚 Citation
 
 If you find this work useful in your research, please consider citing:
 
@@ -139,3 +225,14 @@ If you find this work useful in your research, please consider citing:
   year={2026},
   publisher={Elsevier}
 }
+```
+
+---
+
+# ⭐ Acknowledgement
+
+This repository is built upon several excellent open-source time series forecasting projects and Mamba-based sequence modeling frameworks. We sincerely thank the authors for their valuable contributions to the research community.
+
+
+
+---
