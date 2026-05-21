@@ -10,7 +10,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 
 **Official implementation of**  
-[*Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting*](#)  
+[*Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting*]([#](https://www.sciencedirect.com/science/article/pii/S0950705126000845))  
 **Knowledge-Based Systems (2026)**
 
 </div>
