@@ -1,46 +1,87 @@
+<div align="center">
 
-# Cross-Domain Time-Frequency Mamba (CDTF-Mamba)
+# CDTF-Mamba
+### Cross-Domain Time-Frequency Mamba for Long-Term Time Series Forecasting
 
-> Official implementation for the paper （Knowledge Based System 2026）:  
-> "Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting"
+[![Paper](https://img.shields.io/badge/Paper-Knowledge%20Based%20Systems%202026-b31b1b.svg)](#)
+[![Journal](https://img.shields.io/badge/Venue-Knowledge%20Based%20Systems-1f6feb.svg)](https://www.sciencedirect.com/journal/knowledge-based-systems)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-1.12%2B-EE4C2C.svg?logo=pytorch&logoColor=white)](https://pytorch.org/)
 
-CDTF-Mamba is a novel architecture for **Long-Term Time Series Forecasting (LTSF)** that models time series synergistically in both the **time** and **frequency** domains.  
-It captures **local fluctuations** and **global trends** while retaining the linear complexity and efficiency of the Mamba architecture.
+**Official implementation of**
+[*Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting*](#) **(Knowledge-Based Systems 2026)**
 
-## Abstract
+</div>
 
-Long-term time series forecasting is critical in domains such as smart energy systems and industrial IoT. Existing methods face intertwined challenges because single-domain modeling often fails to capture both **local fluctuations** and **global trends**, leading to incomplete temporal representations.
+---
 
-**CDTF-Mamba** addresses these issues by modeling time series in both **time** and **frequency** domains:
+## 📌 Overview
 
-- **Time-domain Pyramid Mamba (TPM)**: Disentangles multi-scale patterns to capture local dependencies at different temporal granularities.  
-- **Frequency-domain Decomposition Mamba (FDM)**: Stabilizes state evolution, mitigates non-stationarity, and captures periodic/global dependencies.  
+**CDTF-Mamba** is a novel Mamba-based framework for **Long-Term Time Series Forecasting (LTSF)** that jointly models temporal dynamics in both the **time** and **frequency** domains.
 
-Experiments on twelve benchmark datasets demonstrate CDTF-Mamba outperforms state-of-the-art methods in **accuracy, efficiency, and scalability**.
-## Architecture Overview
-![模型架构](Overview.png "CDTF-Mamba Architecture")
-## Installation
-pip install -r requierment.txt  
+Unlike conventional single-domain forecasting methods, CDTF-Mamba captures both **local temporal fluctuations** and **global periodic dependencies** through a collaborative cross-domain modeling paradigm. By integrating hierarchical temporal decomposition with frequency-aware state evolution, the model achieves superior forecasting accuracy while maintaining the efficiency and linear complexity advantages of the Mamba architecture.
 
-## Usage
-Dataset Preparation
+<p align="center">
+  <img src="Overview.png" alt="CDTF-Mamba Framework" width="90%"/>
+  <br/>
+  <em>Figure 1. Overall framework of CDTF-Mamba. The model simultaneously models time-domain and frequency-domain representations. The Time-domain Pyramid Mamba (TPM) captures multi-scale local dependencies, while the Frequency-domain Decomposition Mamba (FDM) extracts global periodic patterns and mitigates non-stationarity, enabling robust long-term forecasting.</em>
+</p>
 
-## Datasets used:
+---
 
-ETTh, ETTm, Weather, Traffic, PEMS, Solar-Energy, Exchange, Electricity
+## 🎯 Key Features
 
+- ⏳ **Time-domain Pyramid Mamba (TPM)** — captures multi-scale temporal dependencies and local fluctuations through hierarchical temporal modeling.
+- 🌊 **Frequency-domain Decomposition Mamba (FDM)** — models periodic structures and stabilizes sequence evolution in the frequency domain.
+- 🔄 **Cross-Domain Fusion Mechanism** — enables effective interaction between temporal and spectral representations for comprehensive sequence understanding.
+- ⚡ **Linear Complexity Forecasting** — inherits the efficiency and scalability advantages of the Mamba architecture.
+- 📊 **Comprehensive Benchmark Evaluation** — validated on multiple real-world datasets spanning traffic, energy, weather, and industrial forecasting tasks.
 
-Place dataset (e.g., PEMS08.npz) under root_path:
+---
 
-./data/PEMS
+## 📊 Results Highlights
 
+| Metric | Result |
+|--------|--------|
+| **Forecasting Accuracy** | Achieves SOTA performance on major benchmarks |
+| **Long-Term Dependency Modeling** | Superior temporal representation capability |
+| **Efficiency** | Linear complexity with fast inference speed |
+| **Scalability** | Robust performance across varying prediction horizons |
+| **Cross-Domain Modeling** | Effectively captures both local and global patterns |
 
-Specify paths in argparse:
+---
 
---root_path
---data_path
-```python
-## Train Model
+## 📈 Datasets
+
+The experiments are conducted on widely used long-term forecasting benchmarks:
+
+- **ETTh1 / ETTh2**
+- **ETTm1 / ETTm2**
+- **Weather**
+- **Traffic**
+- **Electricity**
+- **Exchange**
+- **Solar-Energy**
+- **PEMS**
+
+All datasets are publicly available for research purposes.
+
+---
+
+## 🛠 Installation & Usage
+
+### Requirements
+
+- Python 3.8+
+- PyTorch 1.12+
+- NVIDIA GPU (tested on RTX 4090)
+
+### Install Dependencies
+
+```bash
+pip install -r requirements.txt
+### Training
+```bash
 python main.py \
     --is_training 1 \
     --model_id "CDTF_Mamba_test" \
@@ -64,8 +105,8 @@ python main.py \
     --train_epochs 50 \
     --use_gpu True \
     --gpu 0
-
-## Test Model
+### Testing
+```bash
 python main.py \
     --is_training 0 \
     --model_id "CDTF_Mamba_test" \
@@ -85,3 +126,16 @@ python main.py \
     --use_gpu True \
     --gpu 0
 
+## 📚 Citation
+
+If you find this work useful in your research, please consider citing:
+
+```bibtex
+@article{duan2026cross,
+  title={Cross-Domain Time-Frequency Mamba: A More Effective Model for Long-Term Time Series Forecasting},
+  author={Duan, Yuhang and Lin, Lin and Liu, Jinyuan and Zhang, Qing and Fan, Xin},
+  journal={Knowledge-Based Systems},
+  pages={115341},
+  year={2026},
+  publisher={Elsevier}
+}
